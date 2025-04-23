@@ -1,40 +1,77 @@
 <template>
+    <!-- Landing Page Component -->
+    <LandingPage
+      v-if="showLanding"
+      @start-new="startNew"
+      @load-profile="onLoadProfile"
+    />
+
+    <!-- Main Calculator Page -->
     <div class="mypage">
       <h1>Pathfinder Attack Calculator</h1>
+      <p v-if="currentProfileName" class="current-profile">
+        <em>Profile: {{ currentProfileName }}</em>
+      </p>
 
       <div style="margin-bottom: 20px;">
-        <input v-model="profileName" placeholder="Profile name" />
-        <button @click="saveCurrentProfile">💾 Save Profile</button>
-        <button @click="openProfileLoadMenu">📂 Load Profile</button>
-      </div>
+      <input v-model="profileName" placeholder="Profile name" />
+      <button
+        v-if="!currentProfileName"
+        @click="saveCurrentProfile"
+      >
+        💾 Save Profile
+      </button>
+      <button
+        v-else
+        @click="overwriteCurrentProfile"
+      >
+        💾 Overwrite Profile
+      </button>
+      <button @click="openProfileLoadMenu">📂 Load Profile</button>
+    </div>
 
-      <div class="input-group">
-        <label for="hpCurrent">Current HP:</label>
-        <input id="hpCurrent" type="number" v-model.number="character.hpCurrent" />
-        
-        <label for="hpMax">Max HP:</label>
-        <input id="hpMax" type="number" v-model.number="character.hpMax" />
-      </div>
+      <!-- Profile & Conditions Row -->
+      <div class="profile-conditions-row">
+        <!-- Profile Inputs -->
+        <div class="profile-section">
+          <div class="input-group">
+            <label>Current HP:</label>
+            <input type="number" v-model.number="character.hpCurrent" />
+          </div>
+          <div class="input-group">
+            <label>Max HP:</label>
+            <input type="number" v-model.number="character.hpMax" />
+          </div>
+          <div class="input-group">
+            <label>AC:</label>
+            <input type="number" v-model.number="character.armorClass" />
+          </div>
+          <div class="input-group">
+            <label>BAB:</label>
+            <input type="number" v-model.number="character.bab" />
+          </div>
+          <div class="input-group">
+            <label>Str:</label>
+            <input type="number" v-model.number="character.strength" />
+          </div>
+          <div class="output-group">
+            <p><strong>BAB:</strong> {{ character.bab }}</p>
+            <p><strong>STR mod:</strong> {{ strengthMod }}</p>
+          </div>
+        </div>
 
-      <div class="input-group">
-        <label for="armorClass">AC:</label>
-        <input id="armorClass" type="number" v-model.number="character.armorClass" />
-      </div>
-
-  
-      <div class="input-group">
-        <label for="bab">BAB:</label>
-        <input id="bab" type="number" v-model.number="character.bab" />
-      </div>
-  
-      <div class="input-group">
-        <label for="strength">Str:</label>
-        <input id="strength" type="number" v-model.number="character.strength" />
-      </div>
-  
-      <div class="output-group">
-        <p><strong>BAB:</strong> {{ character.bab }}</p>
-        <p><strong>Strength Modifier:</strong> {{ strengthMod }}</p>
+        <!-- Conditions Panel -->
+        <aside class="conditions-section">
+          <h2>Conditions</h2>
+          <ul>
+            <li v-for="cond in conditions" :key="cond.name">
+              <label>
+                <input type="checkbox" v-model="cond.active" />
+                {{ cond.name }}
+              </label>
+            </li>
+          </ul>
+        </aside>
       </div>
 
       <div v-if="showProfileLoadMenu">
@@ -47,7 +84,7 @@
       </div>
 
   
-      <hr />
+      <hr/>
   
       <h2>Attacks</h2>
   
@@ -58,7 +95,13 @@
         :class="{ editing: attack.editing }"
       >
         <div class="attack-header">
-          <h3>{{ attack.name || 'New Attack' }}</h3>
+          <label class="include-toggle">
+                <input type="checkbox" v-model="attack.includeInSummary" />
+              </label>
+          <h3>{{ attack.name || 'New Attack' }}
+                <span v-if="attack.isIterative"> (Attack #{{ attack.iteration }})</span>
+
+          </h3>
           <button class="edit-button" @click="editAttack(index, character)">✏️ Edit</button>
           <button @click="deleteAttack(index, character)">🗑️ Delete</button>
         </div>
@@ -125,6 +168,7 @@
             </label>
             <label><input type="checkbox" v-model="attack.twoHanded" /> Two-Handed</label>
             <label><input type="checkbox" v-model="attack.magical" /> Magical</label>
+            <label><input type="checkbox" v-model="attack.natural" /> Natural</label>
           </div>
   
   
@@ -164,13 +208,9 @@
 
           
 
-          <label>
-            Save Attack As:
-            <input v-model="saveAttackName" placeholder="Attack name" />
-          </label>
           <button
             @click="() => {
-              saveAttack(index, saveAttackName);
+              saveAttack(index, attack.name);
               completeAttack(index, character);
               saveAttackName = '';
             }"
@@ -181,36 +221,31 @@
         </div>
   
         <div v-else class="attack-display">
+            <p>
+               <strong>Attack:</strong>
+                {{
+                 // use the clone’s loadedBab if present, otherwise fall back
+                 (attack.loadedBab != null ? attack.loadedBab : effectiveBab)
+                 + calculateDamageBonus(attack, character.strength)
+               }}
+             /(
+              {{ attack.count }}{{ attack.die }}
+              <span v-if="attack.slashing"> Slashing</span>
+              <span v-else-if="attack.piercing"> Piercing</span>
+              <span v-else-if="attack.blunt"> Bludgeoning</span>
+              <template v-for="(bonus, idx) in attack.extraDamage" :key="idx">
+                + {{ bonus.count }}{{ bonus.die }} {{ bonus.type }}
+              </template>
+              + {{ calculateDamageBonus(attack, character.strength) + getConditionDamageBonusFor(attack) }}
+            )
+          </p>
           <p>
-            <strong>Base Damage:</strong> {{ attack.count }}{{ attack.die }}
-            + {{ calculateDamageBonus(attack, character.strength) }}
-            ({{ displayDamageTypes(attack) }})
-          </p>
-
-          <p><strong>Attack Bonus:</strong>
-            +{{
-              // if we’ve rolled, use the BAB from that roll;
-              // otherwise use the BAB we “loaded in” (fallback to character.bab if somehow missing)
-              (attack.lastRoll
-                ? attack.lastRoll.statsAtRoll.bab
-                : attack.loadedBab ?? character.bab)
-              + calculateDamageBonus(attack, character.strength)
-            }}
-          </p>
-          <p><strong>Material:</strong> {{ attack.material || '—' }}</p>
-          <p><strong>Reach:</strong> {{ attack.reach }} ft</p>
-
-          <div v-if="attack.extraDamage.length">
-            <p><strong>Extra Damage:</strong></p>
-            <ul>
-              <li
-                v-for="(bonus, i) in attack.extraDamage"
-                :key="i"
-              >
-                {{ bonus.count }}{{ bonus.die }} {{ bonus.type }}
-              </li>
-            </ul>
-          </div>
+          <strong>Material:</strong> {{ attack.material || '—' }}
+          &nbsp;|&nbsp;
+          <strong>Reach:</strong> {{ attack.reach }} ft
+          &nbsp;|&nbsp;
+          <strong>2Hand:</strong> {{ attack.twoHanded }}
+        </p>
   
           <hr />
   
@@ -265,6 +300,18 @@
         </div>
       </div>
   
+          <!-- Roll All and Summary -->
+      <div class="roll-all-section">
+        <button class="roll-all-btn" @click="rollAll">🎲 Roll All</button>
+      </div>
+      <div class="damage-summary" v-if="summary.totalDamage !== null">
+        <h3>Damage Summary</h3>
+        <p><strong>Total Damage:</strong> {{ summary.totalDamage }}</p>
+        <div v-for="(amt, type) in summary.byElement" :key="type">
+          <p><strong>{{ type }} Damage:</strong> {{ amt }}</p>
+        </div>
+      </div>
+
       <div style="margin-bottom: 20px;">
         <button class="add-button" @click="addAttack">➕ Add Attack</button>
         <button class="add-button" @click="openAttackLoadMenu">📂 Load Attack</button>
@@ -283,7 +330,32 @@
   </template>
   
   <script setup>
-  import { ref, computed } from 'vue';
+  import { ref, computed, watch } from 'vue';
+
+  //LANDING PAGE
+  import LandingPage from './LandingPage.vue';
+
+  function startNew() {
+    showLanding.value = false;
+  }
+
+  const currentProfileName = ref('');
+
+  function onLoadProfile(name) {
+    const profile = loadProfile(name);
+    character.value = profile;
+        character.value = {
+      ...profile,
+      attacks: profile.attacks.map(a => ({
+        ...a,
+        editing: false,
+        lastRoll: null,
+        includeInSummary: true
+      }))
+    };
+    currentProfileName.value = name;
+    showLanding.value = false;
+  }
 
   import {
     //Core State
@@ -297,7 +369,7 @@
     editAttack,
     deleteAttack as deleteAttackUtil,
     rollAttack as rollAttackUtil,
-    displayDamageTypes,
+    //displayDamageTypes,
 
     //Exclusive Toggles
     togglePrimary,
@@ -313,16 +385,20 @@
 
   } from './AttackManagerScript.js';
 
+  // Profile save/load UI state
+const showLanding = ref(true);
+const profileName = ref('');
+const savedProfiles = ref([]);
+const showProfileLoadMenu = ref(false);
+  
 const savedAttackNames = ref([]);
 const showAttackLoadMenu = ref(false);
 const saveAttackName = ref('');
 
-// Profile save/load UI state
-const profileName = ref('');
-const savedProfiles = ref([]);
-const showProfileLoadMenu = ref(false);
+
 
 const character = ref({
+  name: '',
   bab: 0,
   strength: 10,
   hpCurrent: 0,
@@ -331,30 +407,161 @@ const character = ref({
   attacks: []
 });
 
+const conditions = ref([
+  { name: 'Power Attack', active: false}
+]);
+
+const powerAttackPenalty = computed(() => {
+  return conditions.value.some(c => c.name === 'Power Attack' && c.active)
+    ? 1 + Math.floor(character.value.bab / 4)
+    : 0;
+});
+
+// Computed effective BAB after penalties
+const effectiveBab = computed(() => {
+  return character.value.bab - powerAttackPenalty.value
+});
+
+function getIterativeCount(bab) {
+  // 1 attack at BAB 1–5, 2 at 6–10, 3 at 11–15, 4 at 16+
+  return Math.floor((bab - 1) / 5) + 1;
+}
+
+watch(() => character.value.bab, (bab) => {
+  const iterCount = getIterativeCount(bab);
+  // find your “base” primary attack
+  const base = character.value.attacks.find(a => a.primary && !a.isIterative);
+  if (!base) return;
+
+  // remove any old iterative clones
+  character.value.attacks = character.value.attacks.filter(a => !a.isIterative);
+
+  // insert N−1 clones immediately after the base
+  const baseIndex = character.value.attacks.indexOf(base);
+  for (let i = 1; i < iterCount; i++) {
+    const iterBAB = bab - (i * 5);
+    const clone = {
+      ...base,
+      isIterative: true,        // flag so we can filter it out later
+      iteration: i + 1,
+      editing: false,
+      lastRoll: null,
+      loadedBab: iterBAB        // step BAB down by 5 per
+    };
+    character.value.attacks.splice(baseIndex + i, 0, clone);
+  }
+  },
+ { immediate: true } // run once at component init
+);
+
+
+// Computed extra damage from conditions
+
+function getConditionDamageBonusFor(attack) {
+  // inactive → no bonus
+  if (!conditions.value.some(c => c.name === 'Power Attack' && c.active)) return 0;
+
+  // Base penalty progression: –1 atk, +2 dmg at BAB1; then +2/+4 at BAB4; etc.
+  const pen = 1 + Math.floor(character.value.bab / 4);
+
+  // Determine multiplier: 2×pen for primary, 1×pen for secondary
+  let mult = attack.secondary ? 1 : 2;
+
+  // Two‑handed weapons deal 1.5× the normal bonus
+  if (attack.twoHanded) {
+    mult = Math.floor(mult * 1.5);
+  }
+
+  return pen * mult;
+}
+
+watch(powerAttackPenalty, (newP, oldP) => {
+  const deltaPen = newP - oldP;
+  character.value.attacks.forEach(atk => {
+    if (!atk.lastRoll) return;
+    const deltaDmg = deltaPen * (atk.secondary ? 1 : 2);
+    atk.lastRoll.baseDamage.bonus += deltaDmg;
+    atk.lastRoll.baseDamage.total += deltaDmg;
+    if (atk.lastRoll.critDamage) {
+      atk.lastRoll.critDamage.bonus += deltaDmg;
+      atk.lastRoll.critDamage.total += deltaDmg;
+    }
+  });
+});
+
 const strengthMod = computed(() =>
   Math.floor((character.value.strength - 10) / 2)
 );
 
 function addAttack() {
   addAttackUtil(character.value);
+  const last = character.value.attacks.length - 1;
+  character.value.attacks[last].includeInSummary = true;
 }
 
 function deleteAttack(index, character) {
   deleteAttackUtil(index, character);
 }
 
-
-
 function rollAttack(index) {
-  const attack = character.value.attacks[index];
-  attack.lastRoll = rollAttackUtil(attack, character.value.bab, character.value.strength);
+  const atk = character.value.attacks[index];
+  const babUsed = atk.loadedBab != null ? atk.loadedBab : effectiveBab.value;
+  atk.lastRoll = rollAttackUtil(atk, babUsed, character.value.strength);
+  // adjust damage totals for condition bonuses
+  const conditionDamageBonus = getConditionDamageBonusFor(atk);
+  atk.lastRoll.baseDamage.bonus += conditionDamageBonus;
+  atk.lastRoll.baseDamage.total += conditionDamageBonus;
+  if (atk.lastRoll.critDamage) {
+    atk.lastRoll.critDamage.bonus += conditionDamageBonus;
+    atk.lastRoll.critDamage.total += conditionDamageBonus;
+  }
+}
+
+function rollAll() {
+  character.value.attacks.forEach((_, i) => rollAttack(i));
 }
 
 
+const summary = computed(() => {
+  let total = 0;
+  const byElement = {};
+  character.value.attacks.forEach(a => {
+    if (!a.lastRoll || !a.includeInSummary) return;
+    // Base and crit damage
+    const base = a.lastRoll.baseDamage.total;
+    const crit = a.lastRoll.critDamage?.total || 0;
+    total += base + crit;
+    // Base damage type grouping
+    let baseType = 'Unspecified';
+    if (a.slashing) baseType = 'Slashing';
+    else if (a.piercing) baseType = 'Piercing';
+    else if (a.blunt) baseType = 'Bludgeoning';
+    byElement[baseType] = (byElement[baseType] || 0) + base + crit;
+    // Extra damage
+    a.lastRoll.extraDamage.forEach(d => {
+      total += d.amount;
+      byElement[d.type] = (byElement[d.type] || 0) + d.amount;
+    });
+  });
+  return {
+    totalDamage: character.value.attacks.some(a => a.lastRoll && a.includeInSummary) ? total : null,
+    byElement
+  };
+});
+
+
 function saveCurrentProfile() {
+  if (!profileName.value) return;
   const profileData = { ...character.value };
   saveProfile(profileName.value, profileData);
+  currentProfileName.value = profileName.value;
   profileName.value = '';
+}
+
+function overwriteCurrentProfile() {
+  if (!currentProfileName.value) return;
+  const profileData = { ...character.value };
+  saveProfile(currentProfileName.value, profileData);
 }
 
 function openProfileLoadMenu() {
@@ -375,6 +582,7 @@ function loadSelectedProfile(name) {
       editing: false,
       lastRoll: null
     }));
+    currentProfileName.value = name; 
     showProfileLoadMenu.value = false;
   }
 }
@@ -392,6 +600,7 @@ function loadAttackByName(name) {
     ...saved,
     editing: false,
     lastRoll: null,
+    includeInSummary: true,
     loadedBab: character.value.bab    // ← capture the current BAB here
   });
 
@@ -400,9 +609,10 @@ function loadAttackByName(name) {
 
 
 function saveAttack(index, name) {
-  const attack = { ...character.value.attacks[index] };
-  delete attack.lastRoll;
-  saveSingleAttack(name, attack);
+  const attackCopy = { ...character.value.attacks[index] };
+  delete attackCopy.lastRoll;
+  delete attackCopy.includeInSummary;
+  saveSingleAttack(name, attackCopy);
 }
 
   </script>
@@ -434,6 +644,11 @@ input[type="number"],
 select {
   max-width: 120px;
 }
+
+main-container { display: flex; flex-direction: column; }
+.profile-conditions-row { display: flex; justify-content: space-between; gap: 24px; }
+.profile-section { flex: 2; }
+.conditions-section { flex: 1; background: #f5f5f5; padding: 16px; border-radius: 8px; }
 
 button {
   padding: 6px 12px;
@@ -537,6 +752,12 @@ button:hover {
 .inline-roll-btn {
   margin-top: 10px;
 }
+
+.roll-all-section { margin-top: 20px; text-align: center; }
+.roll-all-btn { padding: 8px 16px; font-size: 1rem; }
+.damage-summary { margin-top: 20px; background: #f9f9f9; 
+  padding: 16px; border-radius: 8px; max-width: 700px; 
+  margin: 0 auto; text-align: left; }
 
 hr {
   margin: 16px 0;
